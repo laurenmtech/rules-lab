@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Deny by default. Every rule below opens one door.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Throwaway collection for session 3: signed-in users can read, nobody writes.
+    match /scratch/{id} {
+      allow read: if request.auth != null;
+    }
+  }
+}
