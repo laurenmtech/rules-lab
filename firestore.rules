@@ -2,6 +2,26 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---- Helpers ----
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    // Look up the caller's role from /users/{uid}. Each get() is a billed read.
+    // Signed-in users with no profile doc have no role.
+    function role() {
+      return isSignedIn() && exists(userPath()) ? get(userPath()).data.role : null;
+    }
+
+    function hasRole() {
+      return role() in ['witch', 'dragon', 'unicorn'];
+    }
+
     // Deny by default. Every rule below opens one door.
     match /{document=**} {
       allow read, write: if false;
@@ -10,6 +30,37 @@ service cloud.firestore {
     // Throwaway collection for session 3: signed-in users can read, nobody writes.
     match /scratch/{id} {
       allow read: if request.auth != null;
+    }
+
+    // Profiles hold each user's role. Users can read their own, but no client
+    // can write them, or anyone could promote themselves to dragon.
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // Spellbook: witches only, read and write.
+    match /spellbook/{spellId} {
+      allow read, write: if role() == 'witch';
+    }
+
+    // Hoard: every creature can admire it, only dragons can add or take.
+    match /hoard/{itemId} {
+      allow read: if hasRole();
+      allow write: if role() == 'dragon';
+    }
+
+    // Meadow: any creature can post as themselves. Authors edit their own
+    // posts; unicorns keep the peace and can remove anyone's.
+    match /meadow/{postId} {
+      allow read: if hasRole();
+      allow create: if hasRole()
+                    && request.resource.data.authorId == request.auth.uid;
+      allow update: if hasRole()
+                    && resource.data.authorId == request.auth.uid
+                    && request.resource.data.authorId == resource.data.authorId;
+      allow delete: if hasRole()
+                    && (resource.data.authorId == request.auth.uid || role() == 'unicorn');
     }
   }
 }
